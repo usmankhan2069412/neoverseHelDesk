@@ -12,6 +12,15 @@ dist
 dist-ssr
 *.local
 AGENTS.md
+.env
+
+# Backend / Python
+backend/venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/intent_model_v1/
+backend/vector_store/
+backend/*.pyc
 
 # Editor directories and files
 .vscode/*

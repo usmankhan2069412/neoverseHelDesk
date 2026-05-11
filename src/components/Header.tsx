@@ -23,7 +23,7 @@ export default function Header({ onMenuClick }: HeaderProps) {
 
         {/* Logo */}
         <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 bg-gradient-to-br from-primary to-purple-600 rounded-xl flex items-center justify-center shadow-lg glow-sm overflow-hidden">
+          <div className="w-9 h-9 bg-foreground rounded-xl flex items-center justify-center shadow-lg glow-sm overflow-hidden">
             <img src={logo} alt="Logo" className="w-full h-full object-cover rounded-xl" />
           </div>
           <div className="flex flex-col">
@@ -62,9 +62,9 @@ export default function Header({ onMenuClick }: HeaderProps) {
         </button>
 
         {/* Status indicator */}
-        <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
-          <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-          <span className="text-[10px] font-mono font-medium text-emerald-600 dark:text-emerald-400">
+        <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 bg-foreground/5 border border-foreground/10 rounded-lg">
+          <div className="w-1.5 h-1.5 rounded-full bg-foreground animate-pulse" />
+          <span className="text-[10px] font-mono font-medium text-foreground">
             Online
           </span>
         </div>
