@@ -29,6 +29,7 @@ from models.schemas import (
     SessionOut, SessionCreateRequest, MessageOut,
     DocumentOut, DocumentCreateRequest,
     StatsResponse,
+    KnowledgeGapOut, KnowledgeGapUpdateRequest,
 )
 from services import supabase_client as db
 from rag_pipeline import NeoversRAGSystem, DATA_DIR, load_documents, split_documents
@@ -151,6 +152,33 @@ async def chat(req: ChatRequest):
             docs_passed=result.get("docs_passed"),
             top_score=result.get("top_score"),
         )
+
+        # 7. Record knowledge gap if unanswered
+        # Unanswered means either no docs found, OR the LLM determined docs don't contain the answer
+        # and returned the strict fallback string defined in its prompt.
+        is_unanswered = (
+            result.get("docs_passed", 0) == 0 or
+            "I don't have this information right now" in result["answer"]
+        )
+        
+        if is_unanswered and result.get("intent") not in ("Small_Talk", "Complaint"):
+            try:
+                normalized = rag_system.preprocessor.process(req.query)
+                db.upsert_knowledge_gap(normalized, req.query, session_id)
+                logger.info(f"Knowledge gap recorded: {normalized[:60]}")
+            except Exception as e:
+                logger.warning(f"Failed to record knowledge gap: {e}")
+
+        # 8. Update user message with intent, sources, and unanswered flag
+        try:
+            db.update_user_message(
+                message_id=user_msg["id"],
+                is_unanswered=is_unanswered,
+                intent=result.get("intent"),
+                sources=result.get("sources", [])
+            )
+        except Exception as e:
+            logger.warning(f"Failed to update user message: {e}")
 
         return ChatResponse(
             answer=result["answer"],
@@ -383,3 +411,21 @@ def _index_to_supabase(doc_id: str, file_path: Path):
 @app.get("/api/stats", response_model=StatsResponse)
 def get_stats():
     return db.get_stats()
+
+
+# ═════════════════════════════════════════════════════════
+# KNOWLEDGE GAPS
+# ═════════════════════════════════════════════════════════
+
+@app.get("/api/knowledge-gaps", response_model=list[KnowledgeGapOut])
+def list_knowledge_gaps():
+    """Return all non-dismissed knowledge gaps."""
+    rows = db.list_knowledge_gaps()
+    return [KnowledgeGapOut(**r) for r in rows]
+
+
+@app.patch("/api/knowledge-gaps/{gap_id}", response_model=KnowledgeGapOut)
+def update_knowledge_gap(gap_id: str, req: KnowledgeGapUpdateRequest):
+    """Acknowledge or dismiss a knowledge gap."""
+    row = db.update_knowledge_gap_status(gap_id, req.status)
+    return KnowledgeGapOut(**row)

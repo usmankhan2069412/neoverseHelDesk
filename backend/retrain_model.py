@@ -138,7 +138,7 @@ def retrain():
         args=training_args,
         train_dataset=dataset["train"],
         eval_dataset=dataset["test"],
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
     )
 
     print("\nTraining started...")

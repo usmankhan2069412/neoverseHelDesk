@@ -89,3 +89,22 @@ class StatsResponse(BaseModel):
     thumbs_down_count: int
     intents: dict[str, int]
     recent_queries: list[dict]
+    open_gaps: int = 0
+    escalated_gaps: int = 0
+
+
+# ─── Knowledge Gaps ──────────────────────────────────────
+
+class KnowledgeGapOut(BaseModel):
+    id: str
+    query_normalized: str
+    sample_queries: list[str] = []
+    session_ids: list[str] = []
+    hit_count: int
+    status: str
+    first_seen: str
+    last_seen: str
+
+
+class KnowledgeGapUpdateRequest(BaseModel):
+    status: str = Field(..., pattern="^(acknowledged|dismissed)$")

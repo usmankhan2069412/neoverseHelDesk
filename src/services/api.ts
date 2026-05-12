@@ -169,11 +169,41 @@ export interface DashboardStats {
     sources: string[];
     created_at: string;
     session_id: string;
+    is_unanswered?: boolean;
   }>;
+  open_gaps: number;
+  escalated_gaps: number;
 }
 
 export async function getStats(): Promise<DashboardStats> {
   return request<DashboardStats>("/stats");
+}
+
+// ─── Knowledge Gaps ──────────────────────────────────────
+
+export interface KnowledgeGap {
+  id: string;
+  query_normalized: string;
+  sample_queries: string[];
+  session_ids: string[];
+  hit_count: number;
+  status: "open" | "acknowledged" | "dismissed";
+  first_seen: string;
+  last_seen: string;
+}
+
+export async function getKnowledgeGaps(): Promise<KnowledgeGap[]> {
+  return request<KnowledgeGap[]>("/knowledge-gaps");
+}
+
+export async function updateKnowledgeGap(
+  gapId: string,
+  status: "acknowledged" | "dismissed"
+): Promise<KnowledgeGap> {
+  return request<KnowledgeGap>(`/knowledge-gaps/${gapId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ status }),
+  });
 }
 
 // ─── Health ──────────────────────────────────────────────

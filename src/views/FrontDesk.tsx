@@ -26,6 +26,11 @@ interface ChatMessage extends Message {
 }
 
 
+// Speed: characters revealed per tick (ms)
+const STREAM_TICK_MS = 18;
+// Chars revealed per tick (speeds up for long messages)
+const charsPerTick = (totalLen: number) => (totalLen > 500 ? 4 : totalLen > 200 ? 3 : 2);
+
 export default function FrontDesk() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -38,13 +43,46 @@ export default function FrontDesk() {
   const hasConversation = messages.length > 0;
   const showIntro = !hasConversation;
 
+  // Typewriter streaming state
+  const [streamingMsgId, setStreamingMsgId] = useState<string | null>(null);
+  const [displayedLen, setDisplayedLen] = useState(0);
+  const streamTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   const scrollToBottom = useCallback(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, []);
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, isTyping, scrollToBottom]);
+  }, [messages, isTyping, displayedLen, scrollToBottom]);
+
+  // Typewriter effect: progressively reveal characters
+  useEffect(() => {
+    if (!streamingMsgId) return;
+
+    const targetMsg = messages.find((m) => m.id === streamingMsgId);
+    if (!targetMsg) { setStreamingMsgId(null); return; }
+
+    const fullLen = targetMsg.text.length;
+    const step = charsPerTick(fullLen);
+
+    streamTimerRef.current = setInterval(() => {
+      setDisplayedLen((prev) => {
+        const next = prev + step;
+        if (next >= fullLen) {
+          // Done streaming
+          if (streamTimerRef.current) clearInterval(streamTimerRef.current);
+          setStreamingMsgId(null);
+          return fullLen;
+        }
+        return next;
+      });
+    }, STREAM_TICK_MS);
+
+    return () => {
+      if (streamTimerRef.current) clearInterval(streamTimerRef.current);
+    };
+  }, [streamingMsgId, messages]);
 
   const handleSend = async () => {
     if (!input.trim() || isTyping) return;
@@ -70,8 +108,9 @@ export default function FrontDesk() {
         setSessionId(result.session_id);
       }
 
+      const aiMsgId = (Date.now() + 1).toString();
       const aiMsg: ChatMessage = {
-        id: (Date.now() + 1).toString(),
+        id: aiMsgId,
         sender: 'ai',
         text: result.answer,
         timestamp: new Date(),
@@ -83,6 +122,9 @@ export default function FrontDesk() {
       };
 
       setMessages((prev) => [...prev, aiMsg]);
+      // Start typewriter streaming
+      setDisplayedLen(0);
+      setStreamingMsgId(aiMsgId);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : 'Failed to reach AI backend';
       setError(errMsg);
@@ -195,46 +237,54 @@ export default function FrontDesk() {
                 </div>
 
                 <div className="flex flex-col gap-1.5">
-                  <div className={`px-5 py-3.5 text-[14px] sm:text-[15px] leading-relaxed shadow-sm ${msg.sender === 'ai' ? 'rounded-2xl rounded-tl-sm glass border-foreground/10 text-foreground' : 'rounded-2xl rounded-tr-sm bg-foreground text-background'}`}>
-                    {msg.text}
+                  <div className={`px-5 py-3.5 text-[14px] sm:text-[15px] leading-relaxed shadow-sm whitespace-pre-wrap ${msg.sender === 'ai' ? 'rounded-2xl rounded-tl-sm glass border-foreground/10 text-foreground' : 'rounded-2xl rounded-tr-sm bg-foreground text-background'}`}>
+                    {msg.sender === 'ai' && streamingMsgId === msg.id
+                      ? <>{msg.text.slice(0, displayedLen)}<span className="inline-block w-[2px] h-[1em] bg-foreground ml-0.5 animate-pulse align-text-bottom" /></>
+                      : msg.text
+                    }
                   </div>
 
-                  <div className={`flex items-center gap-3 px-1 ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <span className="text-[11px] text-muted-foreground font-medium tracking-wide">{formatTime(msg.timestamp)}</span>
+                  {/* Metadata row — hidden while this message is still streaming */}
+                  {streamingMsgId !== msg.id && (
+                    <div className={`flex items-center gap-3 px-1 ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
+                      style={{ animation: msg.sender === 'ai' ? 'fadeInUp 0.3s ease-out forwards' : undefined }}
+                    >
+                      <span className="text-[11px] text-muted-foreground font-medium tracking-wide">{formatTime(msg.timestamp)}</span>
 
-                    {/* Show intent badge for AI messages */}
-                    {msg.sender === 'ai' && msg.intent && (
-                      <span className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest rounded-full bg-foreground/5 text-foreground border border-foreground/10">
-                        {msg.intent}
-                      </span>
-                    )}
+                      {/* Show intent badge for AI messages */}
+                      {msg.sender === 'ai' && msg.intent && (
+                        <span className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest rounded-full bg-foreground/5 text-foreground border border-foreground/10">
+                          {msg.intent}
+                        </span>
+                      )}
 
-                    {/* Show sources count for AI messages */}
-                    {msg.sender === 'ai' && msg.sources && msg.sources.length > 0 && (
-                      <span className="text-[11px] text-muted-foreground font-medium" title={msg.sources.join(', ')}>
-                        {msg.sources.length} source{msg.sources.length > 1 ? 's' : ''}
-                      </span>
-                    )}
+                      {/* Show sources count for AI messages */}
+                      {msg.sender === 'ai' && msg.sources && msg.sources.length > 0 && (
+                        <span className="text-[11px] text-muted-foreground font-medium" title={msg.sources.join(', ')}>
+                          {msg.sources.length} source{msg.sources.length > 1 ? 's' : ''}
+                        </span>
+                      )}
 
-                    {msg.sender === 'ai' && msg.id !== 'welcome' && (
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          onClick={() => handleFeedback(msg.id, 'up')}
-                          className={`rounded-full p-1.5 transition-all ${feedbackMap[msg.id] === 'up' ? 'bg-foreground/10 text-foreground' : 'text-muted-foreground hover:bg-foreground/5 hover:text-foreground'}`}
-                          aria-label="Helpful"
-                        >
-                          <ThumbsUp size={13} />
-                        </button>
-                        <button
-                          onClick={() => handleFeedback(msg.id, 'down')}
-                          className={`rounded-full p-1.5 transition-all ${feedbackMap[msg.id] === 'down' ? 'bg-foreground/10 text-foreground' : 'text-muted-foreground hover:bg-foreground/5 hover:text-foreground'}`}
-                          aria-label="Not helpful"
-                        >
-                          <ThumbsDown size={13} />
-                        </button>
-                      </div>
-                    )}
-                  </div>
+                      {msg.sender === 'ai' && msg.id !== 'welcome' && (
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => handleFeedback(msg.id, 'up')}
+                            className={`rounded-full p-1.5 transition-all ${feedbackMap[msg.id] === 'up' ? 'bg-foreground/10 text-foreground' : 'text-muted-foreground hover:bg-foreground/5 hover:text-foreground'}`}
+                            aria-label="Helpful"
+                          >
+                            <ThumbsUp size={13} />
+                          </button>
+                          <button
+                            onClick={() => handleFeedback(msg.id, 'down')}
+                            className={`rounded-full p-1.5 transition-all ${feedbackMap[msg.id] === 'down' ? 'bg-foreground/10 text-foreground' : 'text-muted-foreground hover:bg-foreground/5 hover:text-foreground'}`}
+                            aria-label="Not helpful"
+                          >
+                            <ThumbsDown size={13} />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

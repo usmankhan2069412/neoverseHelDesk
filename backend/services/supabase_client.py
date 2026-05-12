@@ -116,6 +116,16 @@ def insert_message(
     return res.data[0]
 
 
+def update_user_message(message_id: str, is_unanswered: bool, intent: str | None = None, sources: list[str] | None = None):
+    """Update a user message with pipeline results."""
+    data = {"is_unanswered": is_unanswered}
+    if intent is not None:
+        data["intent"] = intent
+    if sources is not None:
+        data["sources"] = sources
+    get_client().table("messages").update(data).eq("id", message_id).execute()
+
+
 def get_messages(session_id: str) -> list[dict]:
     """Return all messages in a session, oldest first."""
     res = (
@@ -314,7 +324,7 @@ def get_stats() -> dict:
     recent = (
         get_client()
         .table("messages")
-        .select("id, text, intent, sources, created_at, session_id")
+        .select("id, text, intent, sources, created_at, session_id, is_unanswered")
         .eq("sender", "user")
         .order("created_at", desc=True)
         .limit(20)
@@ -332,4 +342,122 @@ def get_stats() -> dict:
         "thumbs_down_count": fb["thumbs_down"],
         "intents": intents,
         "recent_queries": recent.data,
+        "open_gaps": _count_gaps("open"),
+        "escalated_gaps": _count_escalated_gaps(),
     }
+
+
+def _count_gaps(status: str) -> int:
+    """Count knowledge gaps with a given status."""
+    res = (
+        get_client()
+        .table("knowledge_gaps")
+        .select("id", count="exact")
+        .eq("status", status)
+        .execute()
+    )
+    return res.count or 0
+
+
+def _count_escalated_gaps() -> int:
+    """Count open gaps with hit_count >= 3 (escalation threshold)."""
+    res = (
+        get_client()
+        .table("knowledge_gaps")
+        .select("id", count="exact")
+        .eq("status", "open")
+        .gte("hit_count", 3)
+        .execute()
+    )
+    return res.count or 0
+
+
+# ──────────────────────────────────────────────────────────
+# Knowledge Gaps
+# ──────────────────────────────────────────────────────────
+
+def upsert_knowledge_gap(
+    normalized_query: str,
+    original_query: str,
+    session_id: str,
+) -> dict:
+    """
+    Record an unanswered query.
+    If a gap with the same normalized query exists → update it.
+    Otherwise → insert a new row.
+    """
+    existing = (
+        get_client()
+        .table("knowledge_gaps")
+        .select("*")
+        .eq("query_normalized", normalized_query)
+        .execute()
+    )
+
+    if existing.data:
+        row = existing.data[0]
+        sample_queries = row.get("sample_queries", [])
+        session_ids = row.get("session_ids", [])
+
+        # Append original query if not already stored (keep max 10 samples)
+        if original_query not in sample_queries and len(sample_queries) < 10:
+            sample_queries.append(original_query)
+
+        # Append session_id if distinct
+        if session_id not in session_ids:
+            session_ids.append(session_id)
+
+        update_data = {
+            "sample_queries": sample_queries,
+            "session_ids": session_ids,
+            "hit_count": row["hit_count"] + 1,
+            "last_seen": "now()",
+        }
+        # Re-open dismissed/acknowledged gaps if new sessions hit them
+        if row["status"] != "open" and session_id not in row.get("session_ids", []):
+            update_data["status"] = "open"
+
+        res = (
+            get_client()
+            .table("knowledge_gaps")
+            .update(update_data)
+            .eq("id", row["id"])
+            .execute()
+        )
+        return res.data[0]
+    else:
+        data = {
+            "query_normalized": normalized_query,
+            "sample_queries": [original_query],
+            "session_ids": [session_id],
+            "hit_count": 1,
+            "status": "open",
+        }
+        res = get_client().table("knowledge_gaps").insert(data).execute()
+        return res.data[0]
+
+
+def list_knowledge_gaps(include_dismissed: bool = False) -> list[dict]:
+    """Return knowledge gaps, ordered by last_seen desc."""
+    query = (
+        get_client()
+        .table("knowledge_gaps")
+        .select("*")
+        .order("last_seen", desc=True)
+    )
+    if not include_dismissed:
+        query = query.neq("status", "dismissed")
+    res = query.execute()
+    return res.data
+
+
+def update_knowledge_gap_status(gap_id: str, status: str) -> dict:
+    """Update a knowledge gap's status (acknowledge / dismiss)."""
+    res = (
+        get_client()
+        .table("knowledge_gaps")
+        .update({"status": status})
+        .eq("id", gap_id)
+        .execute()
+    )
+    return res.data[0]
