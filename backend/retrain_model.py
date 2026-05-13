@@ -28,9 +28,10 @@ from transformers import (
     Trainer,
 )
 
+from services import supabase_client as db
+
 # ─── Config ───────────────────────────────────────────────
 MODEL_PATH = Path("./intent_model_v1")
-TRAINING_DATA_FILE = Path("training_data.json")
 BACKUP_DIR = Path("./intent_model_backups")
 INTENT_LABELS = ["FAQ", "IT_Issue", "Complaint", "Small_Talk"]
 LABEL2ID = {label: i for i, label in enumerate(INTENT_LABELS)}
@@ -39,34 +40,27 @@ MIN_EXAMPLES = 20  # Minimum examples required to retrain
 
 
 def load_training_data():
-    """Load and filter training data from JSON."""
-    if not TRAINING_DATA_FILE.exists():
-        print("ERROR: training_data.json not found! Use the chatbot first to collect data.")
+    """Load and filter training data from Supabase database."""
+    print("Fetching training data from Supabase...")
+    try:
+        res = db.get_client().table("training_data").select("*").execute()
+        data = res.data
+    except Exception as e:
+        print(f"ERROR: Failed to fetch training data: {e}")
         return []
 
-    with open(TRAINING_DATA_FILE, "r", encoding="utf-8") as f:
-        data = json.load(f)
+    print(f"Total entries in training_data table: {len(data)}")
 
-    print(f"Total entries in training_data.json: {len(data)}")
-
-    # Filter: use thumbs up data + thumbs down with correct_intent
+    # Filter: use all high-quality training examples
     training_examples = []
     for entry in data:
         query = entry.get("query", "").strip()
         if not query:
             continue
 
-        if entry.get("feedback") == "up":
-            # Thumbs up = predicted intent was correct
-            intent = entry.get("intent", "")
-            if intent in INTENT_LABELS:
-                training_examples.append({"text": query, "label": LABEL2ID[intent]})
-
-        elif entry.get("feedback") == "down" and "correct_intent" in entry:
-            # Thumbs down + manually corrected
-            intent = entry["correct_intent"]
-            if intent in INTENT_LABELS:
-                training_examples.append({"text": query, "label": LABEL2ID[intent]})
+        intent = entry.get("intent", "")
+        if intent in INTENT_LABELS:
+            training_examples.append({"text": query, "label": LABEL2ID[intent]})
 
     print(f"Usable training examples: {len(training_examples)}")
     return training_examples

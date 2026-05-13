@@ -176,6 +176,17 @@ def get_feedback_stats() -> dict:
     }
 
 
+def insert_training_data(query: str, intent: str, vote: str) -> dict:
+    """Save query + intent + feedback for model retraining into the database."""
+    res = (
+        get_client()
+        .table("training_data")
+        .insert({"query": query, "intent": intent, "feedback": vote})
+        .execute()
+    )
+    return res.data[0]
+
+
 # ──────────────────────────────────────────────────────────
 # Documents (knowledge base)
 # ──────────────────────────────────────────────────────────
@@ -228,6 +239,34 @@ def delete_document(doc_id: str) -> bool:
     # Chunks will be deleted automatically due to ON DELETE CASCADE
     get_client().table("documents").delete().eq("id", doc_id).execute()
     return True
+
+
+def get_document_boosts() -> dict[str, float]:
+    """Return a dictionary mapping document_id to their current boost_score."""
+    res = (
+        get_client()
+        .table("documents")
+        .select("id, boost_score")
+        .not_.is_("boost_score", "null")
+        .execute()
+    )
+    return {str(doc["id"]): float(doc["boost_score"]) for doc in res.data}
+
+
+def increment_document_boost(doc_id: str, multiplier: float, cap: float):
+    """
+    Multiply the document's boost_score by a multiplier, up to a maximum cap.
+    """
+    client = get_client()
+    # 1. Fetch current boost
+    res = client.table("documents").select("boost_score").eq("id", doc_id).single().execute()
+    current_boost = res.data.get("boost_score", 1.0) if res.data else 1.0
+    
+    # 2. Calculate new boost
+    new_boost = min(current_boost * multiplier, cap)
+    
+    # 3. Update DB
+    client.table("documents").update({"boost_score": new_boost}).eq("id", doc_id).execute()
 
 
 # ──────────────────────────────────────────────────────────

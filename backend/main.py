@@ -32,7 +32,7 @@ from models.schemas import (
     KnowledgeGapOut, KnowledgeGapUpdateRequest,
 )
 from services import supabase_client as db
-from rag_pipeline import NeoversRAGSystem, DATA_DIR, load_documents, split_documents
+from rag import NeoversRAGSystem, DATA_DIR, split_documents
 
 # ─── Setup ────────────────────────────────────────────────
 load_dotenv()
@@ -158,7 +158,7 @@ async def chat(req: ChatRequest):
         # and returned the strict fallback string defined in its prompt.
         is_unanswered = (
             result.get("docs_passed", 0) == 0 or
-            "I don't have this information right now" in result["answer"]
+            "Sorry, I don't have this information" in result["answer"]
         )
         
         if is_unanswered and result.get("intent") not in ("Small_Talk", "Complaint"):
@@ -372,7 +372,7 @@ def _index_to_supabase(doc_id: str, file_path: Path):
         return
 
     # 1. Load and Chunk
-    from rag_pipeline import split_documents
+    from rag import split_documents
     # We load only the specific file to be efficient
     from langchain_community.document_loaders import TextLoader, PyPDFLoader, Docx2txtLoader
     ext = file_path.suffix.lower()
